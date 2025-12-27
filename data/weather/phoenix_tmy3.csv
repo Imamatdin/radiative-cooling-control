@@ -1,0 +1,4 @@
+# Placeholder CSV for phoenix TMY3
+# Replace with real data
+datetime,ghi,dni,diffuse,air_temp,wind_speed
+2020-01-01T00:00,0,0,0,15.0,1.2

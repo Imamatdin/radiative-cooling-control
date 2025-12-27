@@ -1,0 +1,15 @@
+# Default configuration for radiative-cooling-control
+physics:
+  emissivity: 0.95
+  area: 1.0  # m^2
+  heat_capacity: 900.0  # J/(kg K) or effective
+control:
+  max_flow: 0.02
+  min_flow: 0.0
+  timestep_s: 60
+agent:
+  ddpg:
+    gamma: 0.99
+    tau: 0.005
+    lr_actor: 1e-4
+    lr_critic: 1e-3

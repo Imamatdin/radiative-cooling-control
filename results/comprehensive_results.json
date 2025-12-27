@@ -1,0 +1,15 @@
+{
+  "evaluation": {
+    "DDPG": {"elec_mean": 7.9, "elec_std": 5.0, "water_mean": 99.7, "water_std": 15.0},
+    "TD3": {"elec_mean": 7.5, "elec_std": 4.0, "water_mean": 93.3, "water_std": 20.0},
+    "SAC": {"elec_mean": 7.5, "elec_std": 4.0, "water_mean": 94.0, "water_std": 18.0},
+    "Tower Only": {"elec_mean": -4.5, "elec_std": 1.0, "water_mean": 0.0, "water_std": 0.0},
+    "Fixed 50%": {"elec_mean": 1.4, "elec_std": 1.0, "water_mean": 25.0, "water_std": 5.0},
+    "Fixed 100%": {"elec_mean": 1.5, "elec_std": 1.0, "water_mean": 27.0, "water_std": 5.0}
+  },
+  "training": {
+  "DDPG": {"rewards": [1212, 562, 457, 1461, 670, 1848, 683, 1968, 1835, 820, 2077, 1455, 1761, -33, 356, 1505, 1198, 1829, 1871, 1675], "best_reward": 1705.8},
+  "TD3": {"rewards": [1631, 1858, 1099, 1092, 1002, 708, 1736, 354, 2094, 1518, 1447, 357, 1343, 1424, 1020, 1691, 1290, 1815, 1634, 1699], "best_reward": 1794.1},
+  "SAC": {"rewards": [27, 782, 566, 1696, 1911, 2163, 1699, 823, 1522, 1641, 1610, 1723, 1574, 1672, 1766, 854, 1454, 1550, 1138, 369], "best_reward": 1665.3}
+ }
+}

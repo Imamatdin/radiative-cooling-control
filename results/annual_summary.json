@@ -1,0 +1,206 @@
+{
+  "Phoenix": [
+    {
+      "controller": "Fixed_30",
+      "total_cooling_kWh": 5387.60091190698,
+      "total_pump_kWh": 6.861155937500297,
+      "net_cooling_kWh": 5380.73975596948,
+      "operating_hours": 3211,
+      "night_hours": 3650,
+      "operating_rate": 0.8797260273972602,
+      "violation_hours": 1405,
+      "violation_rate": 0.38493150684931504
+    },
+    {
+      "controller": "Fixed_50",
+      "total_cooling_kWh": 10886.766411394843,
+      "total_pump_kWh": 26.408320312500802,
+      "net_cooling_kWh": 10860.358091082342,
+      "operating_hours": 3650,
+      "night_hours": 3650,
+      "operating_rate": 1.0,
+      "violation_hours": 3650,
+      "violation_rate": 1.0
+    },
+    {
+      "controller": "Proportional",
+      "total_cooling_kWh": 13763.337263305182,
+      "total_pump_kWh": 94.02142833725458,
+      "net_cooling_kWh": 13669.315834967927,
+      "operating_hours": 3650,
+      "night_hours": 3650,
+      "operating_rate": 1.0,
+      "violation_hours": 3634,
+      "violation_rate": 0.9956164383561644
+    },
+    {
+      "controller": "PID",
+      "total_cooling_kWh": 11597.673814470763,
+      "total_pump_kWh": 122.8306349513134,
+      "net_cooling_kWh": 11474.84317951945,
+      "operating_hours": 3648,
+      "night_hours": 3650,
+      "operating_rate": 0.9994520547945206,
+      "violation_hours": 2464,
+      "violation_rate": 0.675068493150685
+    },
+    {
+      "controller": "MPC",
+      "total_cooling_kWh": 3134.467341374441,
+      "total_pump_kWh": 0.025575559967075806,
+      "net_cooling_kWh": 3134.441765814474,
+      "operating_hours": 3109,
+      "night_hours": 3650,
+      "operating_rate": 0.8517808219178082,
+      "violation_hours": 772,
+      "violation_rate": 0.2115068493150685
+    },
+    {
+      "controller": "DDPG",
+      "total_cooling_kWh": 3130.00906083879,
+      "total_pump_kWh": 0.02281250532977441,
+      "net_cooling_kWh": 3129.98624833346,
+      "operating_hours": 3109,
+      "night_hours": 3650,
+      "operating_rate": 0.8517808219178082,
+      "violation_hours": 772,
+      "violation_rate": 0.2115068493150685
+    }
+  ],
+  "Houston": [
+    {
+      "controller": "Fixed_30",
+      "total_cooling_kWh": 6453.17846471724,
+      "total_pump_kWh": 6.861155937500297,
+      "net_cooling_kWh": 6446.3173087797395,
+      "operating_hours": 3576,
+      "night_hours": 3650,
+      "operating_rate": 0.9797260273972602,
+      "violation_hours": 1395,
+      "violation_rate": 0.3821917808219178
+    },
+    {
+      "controller": "Fixed_50",
+      "total_cooling_kWh": 12017.055556470199,
+      "total_pump_kWh": 26.408320312500802,
+      "net_cooling_kWh": 11990.647236157698,
+      "operating_hours": 3650,
+      "night_hours": 3650,
+      "operating_rate": 1.0,
+      "violation_hours": 3605,
+      "violation_rate": 0.9876712328767123
+    },
+    {
+      "controller": "Proportional",
+      "total_cooling_kWh": 9831.37319529526,
+      "total_pump_kWh": 29.305026048912914,
+      "net_cooling_kWh": 9802.068169246348,
+      "operating_hours": 3648,
+      "night_hours": 3650,
+      "operating_rate": 0.9994520547945206,
+      "violation_hours": 3070,
+      "violation_rate": 0.8410958904109589
+    },
+    {
+      "controller": "PID",
+      "total_cooling_kWh": 18950.01210967228,
+      "total_pump_kWh": 181.9034938105435,
+      "net_cooling_kWh": 18768.108615861736,
+      "operating_hours": 3650,
+      "night_hours": 3650,
+      "operating_rate": 1.0,
+      "violation_hours": 3642,
+      "violation_rate": 0.9978082191780822
+    },
+    {
+      "controller": "MPC",
+      "total_cooling_kWh": 3391.574520363812,
+      "total_pump_kWh": 0.023602826668900304,
+      "net_cooling_kWh": 3391.550917537143,
+      "operating_hours": 3549,
+      "night_hours": 3650,
+      "operating_rate": 0.9723287671232876,
+      "violation_hours": 276,
+      "violation_rate": 0.07561643835616438
+    },
+    {
+      "controller": "DDPG",
+      "total_cooling_kWh": 3387.4079530405606,
+      "total_pump_kWh": 0.022812515713283035,
+      "net_cooling_kWh": 3387.3851405248474,
+      "operating_hours": 3549,
+      "night_hours": 3650,
+      "operating_rate": 0.9723287671232876,
+      "violation_hours": 276,
+      "violation_rate": 0.07561643835616438
+    }
+  ],
+  "Seattle": [
+    {
+      "controller": "Fixed_30",
+      "total_cooling_kWh": 11041.391229972165,
+      "total_pump_kWh": 6.861155937500297,
+      "net_cooling_kWh": 11034.530074034665,
+      "operating_hours": 3650,
+      "night_hours": 3650,
+      "operating_rate": 1.0,
+      "violation_hours": 18,
+      "violation_rate": 0.004931506849315068
+    },
+    {
+      "controller": "Fixed_50",
+      "total_cooling_kWh": 14190.923527628607,
+      "total_pump_kWh": 26.408320312500802,
+      "net_cooling_kWh": 14164.515207316106,
+      "operating_hours": 3650,
+      "night_hours": 3650,
+      "operating_rate": 1.0,
+      "violation_hours": 3484,
+      "violation_rate": 0.9545205479452055
+    },
+    {
+      "controller": "Proportional",
+      "total_cooling_kWh": 15954.676340347147,
+      "total_pump_kWh": 51.19357400858698,
+      "net_cooling_kWh": 15903.48276633856,
+      "operating_hours": 3650,
+      "night_hours": 3650,
+      "operating_rate": 1.0,
+      "violation_hours": 3548,
+      "violation_rate": 0.972054794520548
+    },
+    {
+      "controller": "PID",
+      "total_cooling_kWh": 6277.603179907774,
+      "total_pump_kWh": 0.028119821628051236,
+      "net_cooling_kWh": 6277.575060086146,
+      "operating_hours": 3650,
+      "night_hours": 3650,
+      "operating_rate": 1.0,
+      "violation_hours": 1,
+      "violation_rate": 0.000273972602739726
+    },
+    {
+      "controller": "MPC",
+      "total_cooling_kWh": 6282.597257414038,
+      "total_pump_kWh": 0.025567395053738676,
+      "net_cooling_kWh": 6282.571690018984,
+      "operating_hours": 3650,
+      "night_hours": 3650,
+      "operating_rate": 1.0,
+      "violation_hours": 0,
+      "violation_rate": 0.0
+    },
+    {
+      "controller": "DDPG",
+      "total_cooling_kWh": 6273.952834333296,
+      "total_pump_kWh": 0.022812539814074197,
+      "net_cooling_kWh": 6273.9300217934815,
+      "operating_hours": 3650,
+      "night_hours": 3650,
+      "operating_rate": 1.0,
+      "violation_hours": 0,
+      "violation_rate": 0.0
+    }
+  ]
+}
