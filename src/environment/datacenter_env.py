@@ -83,7 +83,7 @@ class DatacenterCoolingEnv:
     def __init__(self, weather_df: pd.DataFrame, episode_hours: int = 48,
                  plant_cfg: PlantConfig = None, reward_shaping: bool = False,
                  load_noise: bool = True, water_price: float = WATER_PRICE,
-                 tank_volume_m3: float = 50.0, tank_power_kW: float = 500.0):
+                 tank_volume_m3: float = 50.0, tank_power_kW: float = 500.0, reward_scale: float = 15.0):
         self.weather_df = weather_df.reset_index(drop=True)
         self.n_hours = len(self.weather_df)
         self.episode_hours = int(episode_hours)
@@ -92,6 +92,7 @@ class DatacenterCoolingEnv:
         self.load_noise = load_noise
         self.water_price = float(water_price)
         self.tank_power_kW = float(tank_power_kW)
+        self.reward_scale = float(reward_scale)
         self.tank = ThermalStorageTank(volume_m3=tank_volume_m3, T_initial_C=11.0, T_min_C=7.0, T_max_C=15.0)
         self.pricing = PRICES
 
@@ -222,7 +223,7 @@ class DatacenterCoolingEnv:
         self.baseline_water_L += base["water_L"]
         self.baseline_cost += base_cost
 
-        reward = (base_cost - cost) * 15.0
+        reward = (base_cost - cost) * self.reward_scale
         if self.reward_shaping:   # original hand-written arbitrage terms, kept only for ablation
             soc = self.tank.state_of_charge
             if soc > 0.98 or soc < 0.02:
