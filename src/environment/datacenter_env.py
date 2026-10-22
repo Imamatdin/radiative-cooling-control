@@ -1,316 +1,261 @@
 """
-Datacenter Cooling Environment (Production Master).
-Target: 1 MW Google-Scale Pod with Thermal Battery.
+Datacenter cooling environment: 1 MW IT load, chiller + radiative panel field + cooling tower,
+with a stratified chilled-water storage tank.
 
-Integrates:
-- High-Efficiency Centrifugal Chiller (COP 6.5)
-- Radiative Sky Cooling Panels (5000 m2)
-- Stratified Water Thermal Storage (50 m3)
-- Real Weather & Dynamic Pricing
-- Full Reward Engineering (Time-of-Use Arbitrage)
+Corrected version (Oct 2026). Changes from the version used for the original paper draft:
+
+1. Sky radiation comes from the downwelling longwave in the weather files (PVGIS 'IR(h)', ERA5).
+   The old loader had no cloud column and silently set cloud = 0, so every hour was clear-sky.
+2. Weather rows are UTC; they are now shifted to local standard time. Time-of-use prices,
+   the night flag, the load profile and hour-of-day were previously applied to UTC hours.
+3. Plant physics is solved as one energy-consistent condenser loop (src/physics/condenser_loop.py).
+   The old panel model could cool the fluid below ambient through a surface held at 33 C.
+4. Daytime solar absorption on the panels and wind-dependent convection are included.
+5. Tank minimum temperature is the chilled-water supply temperature (7 C): a chiller with a
+   7 C evaporator cannot charge the tank to 4 C.
+6. Chiller capacity is 1.2 MW so peak load plus tank charging is physically servable; charging
+   is limited to chiller headroom and any unmet cooling is reported in info.
+7. Reward = cost savings vs tower-only. The hand-written arbitrage bonuses are off by default
+   (reward_shaping=True restores them for ablation) because they encode the storage strategy
+   the agent is claimed to discover.
+
+Interface is unchanged: reset(start_hour) -> state, step(action) -> (state, reward, done, info),
+get_forecast(horizon), state_dim = 9, action_dim = 2.
 """
 
+import os
 import numpy as np
 import pandas as pd
-import sys
-import os
 
-# Ensure we can import from src/physics
-# This allows the script to find your physics modules no matter where it's run
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../..'))
-
-from src.physics.chiller import Chiller, CoolingTower, RadiativeHeatRejection
+from src.physics.condenser_loop import PlantConfig, plant_hour, panel_capacity_kW, SIGMA
 from src.physics.storage import ThermalStorageTank
 
+# Local standard-time offsets from UTC (hours). Tariffs follow local prevailing time; DST is
+# ignored here (stated as a limitation), which shifts summer TOU windows by one hour.
+CITY_UTC_OFFSET = {"phoenix": -7, "houston": -6, "seattle": -8}
+
+PRICES = {"off_peak": 0.06, "mid_peak": 0.12, "on_peak": 0.25}   # $/kWh, illustrative TOU tariff
+WATER_PRICE = 0.005                                              # $/L
+
+
+def tou_price(hod):
+    hod = np.asarray(hod) % 24
+    return np.where((hod >= 22) | (hod < 6), PRICES["off_peak"],
+                    np.where((hod >= 14) & (hod < 19), PRICES["on_peak"], PRICES["mid_peak"]))
+
+
+def it_cooling_load(hod, base_kW=1000.0):
+    """Deterministic daily load profile [kW] (peak mid-afternoon), local hour of day."""
+    return base_kW * (0.85 + 0.15 * np.sin(((np.asarray(hod, float) - 9) / 24) * 2 * np.pi))
+
+
+def load_weather(filepath: str, utc_offset_h: int = None) -> pd.DataFrame:
+    """
+    Load a PVGIS TMY csv (pvlib get_pvgis_tmy output) and return hourly local-standard-time rows with
+    T_air_C, rh (0-1), ghi, L_down (downwelling longwave W/m2), wind (m/s).
+    """
+    df = pd.read_csv(filepath)
+    df.columns = df.columns.str.lower().str.strip()
+    required = {"temp_air", "relative_humidity", "ghi", "ir(h)", "wind_speed"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"{filepath}: missing columns {sorted(missing)}; expected PVGIS TMY format")
+    if utc_offset_h is None:
+        name = os.path.basename(filepath).lower()
+        matches = [off for city, off in CITY_UTC_OFFSET.items() if city in name]
+        if not matches:
+            raise ValueError(f"cannot infer UTC offset from '{name}'; pass utc_offset_h")
+        utc_offset_h = matches[0]
+    out = pd.DataFrame({
+        "T_air_C": df["temp_air"].astype(float).values,
+        "rh": np.clip(df["relative_humidity"].astype(float).values / 100.0, 0.01, 0.99),
+        "ghi": np.clip(df["ghi"].astype(float).values, 0, None),
+        "L_down": df["ir(h)"].astype(float).values,
+        "wind": np.clip(df["wind_speed"].astype(float).values, 0, None),
+    })
+    # local[i] = utc[i - offset]  (offset negative for the Americas)
+    out = pd.DataFrame(np.roll(out.values, utc_offset_h, axis=0), columns=out.columns)
+    out.attrs["utc_offset_h"] = utc_offset_h
+    return out
+
+
 class DatacenterCoolingEnv:
-    def __init__(
-        self,
-        weather_df: pd.DataFrame,
-        episode_hours: int = 48,
-        electricity_price_default: float = 0.10,
-        water_price: float = 0.005,
-    ):
+    def __init__(self, weather_df: pd.DataFrame, episode_hours: int = 48,
+                 plant_cfg: PlantConfig = None, reward_shaping: bool = False,
+                 load_noise: bool = True, water_price: float = WATER_PRICE,
+                 tank_volume_m3: float = 50.0, tank_power_kW: float = 500.0):
         self.weather_df = weather_df.reset_index(drop=True)
+        self.n_hours = len(self.weather_df)
         self.episode_hours = int(episode_hours)
+        self.cfg = plant_cfg or PlantConfig()
+        self.reward_shaping = reward_shaping
+        self.load_noise = load_noise
         self.water_price = float(water_price)
-        
-        # --- 1. REALISTIC "GOOGLE POD" SIZING (1 MW) ---
-        # Chiller: 1000 kW, High Efficiency (COP 6.5)
-        # (Claude's version was 400kW/5.5COP -> This is the "Pro" upgrade)
-        self.chiller = Chiller(capacity_kW=1000, rated_COP=6.5)
-        
-        # Tower: 1500 kW (1.5x Safety Factor)
-        self.tower = CoolingTower(capacity_kW=1500)
-        
-        # Panels: 5000 m2 (Approx 1 Football Field)
-        # 5000m2 * 100 W/m2 = 500kW cooling capacity (50% of base load)
-        self.panels = RadiativeHeatRejection(panel_area_m2=5000)
-        
-        # Battery: 50 m3 (50,000 Liters)
-        # Stores ~300-400 kWh of cooling. 
-        # Imported from src.physics.storage to ensure REAL thermodynamics.
-        self.tank = ThermalStorageTank(
-            volume_m3=50.0,
-            T_initial_C=7.0,
-            T_min_C=4.0,
-            T_max_C=15.0
-        )
-        
-        # 1 MW Base Load (Google Standard)
-        self.base_cooling_load = 1000.0
+        self.tank_power_kW = float(tank_power_kW)
+        self.tank = ThermalStorageTank(volume_m3=tank_volume_m3, T_initial_C=11.0, T_min_C=7.0, T_max_C=15.0)
+        self.pricing = PRICES
+
+        w = self.weather_df
+        self._wx = {k: w[k].values.astype(float) for k in ("T_air_C", "rh", "ghi", "L_down", "wind")}
+        # Precompute per-hour features (vectorized)
+        self._rad_cap = panel_capacity_kW(self._wx, self.cfg)
+        self._sky_deficit = SIGMA * (self._wx["T_air_C"] + 273.15) ** 4 - self._wx["L_down"]
+
         self.start_hour = 0
         self.current_step = 0
-        
-        # Pricing Structure (Time of Use) - EXACTLY AS CLAUDE DEFINED
-        self.pricing = {
-            'off_peak': 0.06,  # Night (Cheap)
-            'mid_peak': 0.12,  # Day (Normal)
-            'on_peak': 0.25    # 2PM - 7PM (Expensive)
-        }
-        
-        # Tracking
-        self.total_electricity_kWh = 0.0
-        self.total_water_L = 0.0
-        self.baseline_electricity_kWh = 0.0
-        self.baseline_water_L = 0.0
+        self._reset_tracking()
+
+    # ---- helpers used by baselines -------------------------------------------------
+    def wx_at(self, hour):
+        i = np.asarray(hour) % self.n_hours
+        return {k: v[i] for k, v in self._wx.items()}
+
+    def get_electricity_price(self, hour):
+        return float(tou_price(hour % 24))
+
+    def expected_load(self, hour):
+        return it_cooling_load(np.asarray(hour) % 24)
 
     @property
+    def tank_stored_kWh(self):
+        return self.tank.available_cooling_kWh
+
+    @property
+    def tank_capacity_kWh(self):
+        return self.tank.capacity_kWh
+
+    def hour_cost(self, out, price):
+        return out["W_total_kW"] * price + out["water_L"] * self.water_price
+
+    # ---- gym-style API --------------------------------------------------------------
+    @property
     def state_dim(self):
-        # 9 Features: Weather(3), Time(1), Cap(1), Load(1), SOC(1), Price(1), Night(1)
         return 9
 
     @property
     def action_dim(self):
-        # 2 Actions: [Radiative_Fraction, Tank_Control]
         return 2
 
     @property
     def current_hour(self):
         return self.start_hour + self.current_step
 
-    def get_electricity_price(self, hour: int) -> float:
-        """Get electricity price based on time of day (TOU)."""
-        hod = hour % 24
-        # Off-peak: 10PM - 6AM
-        if 22 <= hod or hod < 6: 
-            return self.pricing['off_peak']
-        # On-peak: 2PM - 7PM (Crucial for Battery Arbitrage)
-        if 14 <= hod < 19: 
-            return self.pricing['on_peak']
-        # Mid-peak: Everything else
-        return self.pricing['mid_peak']
-
-    def reset(self, start_hour: int = None) -> np.ndarray:
-        max_start = len(self.weather_df) - self.episode_hours - 24
-        # Smart random start (avoid end of file)
-        self.start_hour = start_hour if start_hour else np.random.randint(0, max(1, max_start))
-        
-        self.current_step = 0
+    def _reset_tracking(self):
         self.total_electricity_kWh = 0.0
         self.total_water_L = 0.0
+        self.total_cost = 0.0
         self.baseline_electricity_kWh = 0.0
         self.baseline_water_L = 0.0
-        
-        # Reset Tank to 50% SOC (Realistic random starting point)
-        self.tank.reset(T_initial_C=np.random.uniform(6.0, 12.0))
-        
+        self.baseline_cost = 0.0
+        self.unmet_cooling_kWh = 0.0
+
+    def reset(self, start_hour: int = None, soc0: float = None) -> np.ndarray:
+        max_start = self.n_hours - self.episode_hours - 24
+        self.start_hour = int(start_hour) if start_hour is not None else int(np.random.randint(0, max(1, max_start)))
+        self.current_step = 0
+        self._reset_tracking()
+        if soc0 is None:
+            T0 = np.random.uniform(8.0, 14.0)
+        else:
+            T0 = 15.0 - float(np.clip(soc0, 0, 1)) * (15.0 - 7.0)
+        self.tank.reset(T_initial_C=T0)
+        self.tank_start_kWh = self.tank_stored_kWh
         return self._get_state()
 
+    def _load(self, hour):
+        load = float(it_cooling_load(hour % 24))
+        if self.load_noise:
+            load *= 1 + np.random.uniform(-0.02, 0.02)
+        return load
+
     def _get_state(self) -> np.ndarray:
-        w = self._get_weather(self.current_hour)
+        h = self.current_hour % self.n_hours
         hod = self.current_hour % 24
         price = self.get_electricity_price(self.current_hour)
-        load = self._get_cooling_load(hod)
-        
-        rad_cap = self.panels.calculate_capacity(
-            T_air_C=w['T_air_C'], rh=w['rh'], cloud_fraction=w['cloud'], T_fluid_in_C=35.0
-        )
-        
-        # Normalized State Vector
         state = np.array([
-            (w['T_air_C'] - 10) / 40,      # 0. Temp (Norm)
-            w['rh'],                       # 1. RH (0-1)
-            w['cloud'],                    # 2. Cloud (0-1)
-            hod / 24.0,                    # 3. Time (0-1)
-            rad_cap / 2000.0,              # 4. Rad Cap (Norm)
-            load / 1500.0,                 # 5. Load (Norm)
-            self.tank.state_of_charge,     # 6. SOC (0-1)
-            (price - 0.06) / 0.19,         # 7. Price (Norm)
-            1.0 if (hod < 6 or hod >= 20) else 0.0 # 8. Night Flag
+            (self._wx["T_air_C"][h] - 10) / 40,
+            self._wx["rh"][h],
+            self._sky_deficit[h] / 150.0,          # sky radiative deficit (replaces the always-zero cloud slot)
+            hod / 24.0,
+            self._rad_cap[h] / 2000.0,
+            float(it_cooling_load(hod)) / 1500.0,
+            self.tank.state_of_charge,
+            (price - 0.06) / 0.19,
+            1.0 if (hod < 6 or hod >= 20) else 0.0,
         ], dtype=np.float32)
         return np.clip(state, 0.0, 1.0)
 
-    def _get_weather(self, hour: int) -> dict:
-        idx = min(hour, len(self.weather_df) - 1)
-        row = self.weather_df.iloc[idx]
-        return {
-            'T_air_C': float(row['T_air_C']),
-            'rh': float(np.clip(row['rh'], 0.01, 0.99)),
-            'cloud': float(np.clip(row.get('cloud', 0.0), 0.0, 1.0))
-        }
+    def step(self, action):
+        if isinstance(action, (int, float)):
+            action = [action, 0.0]
+        alpha = float(np.clip(action[0], 0.0, 1.0))
+        beta = float(np.clip(action[1], -1.0, 1.0))
+        hour = self.current_hour
+        wx = self.wx_at(hour)
+        price = self.get_electricity_price(hour)
+        load = self._load(hour)
+        cap = self.cfg.chiller_capacity_kW
 
-    def _get_cooling_load(self, hod: int) -> float:
-        """
-        Google Datacenter Load Profile (1 MW Base).
-        Adds realistic daily variation + random noise.
-        """
-        base = 1000.0
-        # Peak load during day (10AM - 6PM)
-        profile = 0.85 + 0.15 * np.sin(((hod - 9) / 24) * 2 * np.pi)
-        noise = np.random.uniform(-0.02, 0.02)
-        return base * profile * (1 + noise)
+        Q_dis = Q_ch = 0.0
+        if beta > 0.05:
+            Q_dis = self.tank.discharge(beta * self.tank_power_kW * 1000.0, dt_s=3600)["energy_delivered_kWh"]
+            Q_dis = min(Q_dis, load)
+        elif beta < -0.05:
+            headroom = max(0.0, cap - load)
+            req = min(-beta * self.tank_power_kW, headroom)
+            if req > 0:
+                Q_ch = self.tank.charge(req * 1000.0, dt_s=3600)["energy_stored_kWh"]
+        Q_evap = load - Q_dis + Q_ch
+        unmet = max(0.0, Q_evap - cap)
+        Q_evap = min(Q_evap, cap)
+        self.unmet_cooling_kWh += unmet
 
-    def step(self, action: np.ndarray) -> tuple:
-        """
-        Physics Step.
-        Action[0]: Radiative Fraction (0-1)
-        Action[1]: Tank Control (-1 to 1) -> (-) Charge, (+) Discharge
-        """
-        # Handle single float input or list
-        if isinstance(action, (int, float)): action = [action, 0.0]
-        
-        rad_frac = np.clip(action[0], 0.0, 1.0)
-        tank_ctrl = np.clip(action[1], -1.0, 1.0) 
-        
-        w = self._get_weather(self.current_hour)
-        price = self.get_electricity_price(self.current_hour)
-        load = self._get_cooling_load(self.current_hour % 24)
-        
-        # --- BASELINE CALCULATION (Standard Chiller + Tower) ---
-        # This gives us the "Comparison" to prove savings
-        base_tower = self.tower.operate(load * 1.3, w['T_air_C'], w['rh'])
-        base_chiller = self.chiller.operate(load, base_tower['T_water_out_C'])
-        base_cost = (base_chiller['W_electric_kW'] + base_tower['W_fan_kW']) * price + \
-                    (base_tower['water_consumption_L'] * self.water_price)
-        
-        self.baseline_electricity_kWh += (base_chiller['W_electric_kW'] + base_tower['W_fan_kW'])
-        self.baseline_water_L += base_tower['water_consumption_L']
+        out = {k: float(v) for k, v in plant_hour(Q_evap, alpha, wx, self.cfg).items()}
+        base = {k: float(v) for k, v in plant_hour(min(load, cap), 0.0, wx, self.cfg).items()}
+        cost = self.hour_cost(out, price) + unmet * 10.0          # unmet cooling is heavily penalised
+        base_cost = self.hour_cost(base, price)
 
-        # --- HYBRID SYSTEM PHYSICS ---
-        Q_discharge_kW = 0.0
-        Q_charge_kW = 0.0
-        
-        if tank_ctrl > 0.05: # DISCHARGE (Help Chiller)
-            # "tank_ctrl" determines % of max discharge rate (500 kW)
-            req_Discharge = tank_ctrl * 500.0 
-            res = self.tank.discharge(req_Discharge * 1000.0, dt_s=3600)
-            Q_discharge_kW = res['energy_delivered_kWh'] # 1 hour = kWh
-            
-        elif tank_ctrl < -0.05: # CHARGE (Add to Load)
-            # "tank_ctrl" determines % of max charge rate (500 kW)
-            req_Charge = -tank_ctrl * 500.0
-            res = self.tank.charge(req_Charge * 1000.0, dt_s=3600)
-            Q_charge_kW = res['energy_stored_kWh']
+        self.total_electricity_kWh += out["W_total_kW"]
+        self.total_water_L += out["water_L"]
+        self.total_cost += cost
+        self.baseline_electricity_kWh += base["W_total_kW"]
+        self.baseline_water_L += base["water_L"]
+        self.baseline_cost += base_cost
 
-        # Net Load the Chiller/Panels must handle
-        # Net = DataCenter - Discharge(Help) + Charge(Burden)
-        net_load = max(0, load - Q_discharge_kW + Q_charge_kW)
-        
-        # Total Heat to Reject (Load + Compressor Work Estimate ~30%)
-        Q_total_reject = net_load * 1.3
-        
-        # Split heat between Radiative Panels and Tower
-        Q_to_rad = Q_total_reject * rad_frac
-        
-        # 1. Run Panels
-        rad_res = self.panels.operate(Q_to_rad, w['T_air_C'], w['rh'], w['cloud'], 35.0)
-        
-        # 2. Run Tower (Remainder)
-        Q_remain = Q_total_reject - rad_res['Q_rejected_kW']
-        if Q_remain > 0:
-            tower_res = self.tower.operate(Q_remain, w['T_air_C'], w['rh'])
-        else:
-            tower_res = {'T_water_out_C': rad_res['T_fluid_out_C'], 'W_fan_kW': 0, 'water_consumption_L': 0}
-            
-        # 3. Mix Temperatures for Condenser
-        # (Weighted average of Panel return and Tower return)
-        if rad_res['Q_rejected_kW'] > 0 and Q_remain > 0:
-            T_cond = (rad_res['Q_rejected_kW'] * rad_res['T_fluid_out_C'] + 
-                      Q_remain * tower_res['T_water_out_C']) / Q_total_reject
-        elif rad_res['Q_rejected_kW'] > 0:
-            T_cond = rad_res['T_fluid_out_C']
-        else:
-            T_cond = tower_res['T_water_out_C']
-            
-        # 4. Run Chiller
-        chiller_res = self.chiller.operate(net_load, T_cond)
-        
-        # --- COSTS & REWARDS ---
-        elec_kW = chiller_res['W_electric_kW'] + tower_res['W_fan_kW'] + rad_res['W_pump_kW']
-        water_L = tower_res['water_consumption_L']
-        
-        self.total_electricity_kWh += elec_kW
-        self.total_water_L += water_L
-        
-        cost = elec_kW * price + water_L * self.water_price
-        savings = base_cost - cost
-        
-        # --- REWARD ENGINEERING (PRO TUNING V3.4) ---
-        # 1. Base Savings Reward (Increased multiplier for electricity focus)
-        reward = savings * 15.0  
-
-        # 2. PRO-FIX: Tank Stagnation Penalty
-        # If SOC is stuck at 1.0 or 0.0 for too long, apply a small penalty
-        # This forces the agent to realize "doing nothing" is not optimal.
-        if self.tank.state_of_charge > 0.98 or self.tank.state_of_charge < 0.02:
-            reward -= 0.5
-
-        # 3. PRO-FIX: Arbitrage Multipliers
-        # Bonus: Smart Charging (Charge when price is cheap)
-        if tank_ctrl < -0.2 and price <= self.pricing['off_peak']:
-            reward += 3.0 # Doubled incentive to charge at night
-            
-        # Bonus: Smart Discharging (Discharge when price is high)
-        if tank_ctrl > 0.2 and price >= self.pricing['on_peak']:
-            reward += 6.0 # Tripled incentive to discharge during peak
-            
-        # 4. Hard Grid Constraints
-        # Penalty: Empty tank during Peak Pricing (Grid Stress)
-        if price >= self.pricing['on_peak'] and self.tank.state_of_charge < 0.15:
-            reward -= 10.0
-
-        # Penalty: Dumb Charging (Charging during peak price)
-        if tank_ctrl < -0.1 and price >= self.pricing['on_peak']:
-            reward -= 10.0
+        reward = (base_cost - cost) * 15.0
+        if self.reward_shaping:   # original hand-written arbitrage terms, kept only for ablation
+            soc = self.tank.state_of_charge
+            if soc > 0.98 or soc < 0.02:
+                reward -= 0.5
+            if beta < -0.2 and price <= PRICES["off_peak"]:
+                reward += 3.0
+            if beta > 0.2 and price >= PRICES["on_peak"]:
+                reward += 6.0
+            if price >= PRICES["on_peak"] and soc < 0.15:
+                reward -= 10.0
+            if beta < -0.1 and price >= PRICES["on_peak"]:
+                reward -= 10.0
 
         self.current_step += 1
         done = self.current_step >= self.episode_hours
-        
-        # --- Calculate Water Savings ---
-        if self.baseline_water_L > 0:
-            water_savings_pct = (self.baseline_water_L - self.total_water_L) / self.baseline_water_L * 100.0
-        else:
-            water_savings_pct = 0.0
-
         info = {
-            'electricity_savings_pct': (self.baseline_electricity_kWh - self.total_electricity_kWh)/max(1, self.baseline_electricity_kWh)*100,
-            'water_savings_pct': water_savings_pct,
-            'tank_soc': self.tank.state_of_charge,
-            'action_tank': tank_ctrl,
-            'price': price
+            "electricity_savings_pct": (self.baseline_electricity_kWh - self.total_electricity_kWh) / max(1.0, self.baseline_electricity_kWh) * 100,
+            "water_savings_pct": (self.baseline_water_L - self.total_water_L) / max(1.0, self.baseline_water_L) * 100,
+            "cost_savings_pct": (self.baseline_cost - self.total_cost) / max(1e-9, self.baseline_cost) * 100,
+            "tank_soc": self.tank.state_of_charge,
+            "action_tank": beta,
+            "price": price,
+            "unmet_cooling_kWh": self.unmet_cooling_kWh,
+            "Q_panel_kW": out["Q_panel_kW"],
+            "COP": out["COP"],
         }
         return self._get_state(), reward, done, info
 
     def get_forecast(self, horizon: int = 6) -> np.ndarray:
-        forecast = []
-        for h in range(horizon):
-            w = self._get_weather(self.current_hour + h)
-            price = self.get_electricity_price(self.current_hour + h)
-            # Forecast Vector: [Temp, RH, Cloud, Normalized_Price]
-            forecast.append([
-                (w['T_air_C'] - 10) / 40, 
-                w['rh'], 
-                w['cloud'], 
-                (price - 0.06) / 0.19
-            ])
-        return np.array(forecast, dtype=np.float32)
-
-# Helper function to load and clean weather data
-def load_weather(filepath: str) -> pd.DataFrame:
-    df = pd.read_csv(filepath)
-    df.columns = df.columns.str.lower().str.strip()
-    col_map = {'temp_air': 'T_air_C', 't_air': 'T_air_C', 'relative_humidity': 'rh', 'humidity': 'rh'}
-    df = df.rename(columns=col_map)
-    if 'rh' in df.columns and df['rh'].max() > 1.5: df['rh'] = df['rh'] / 100.0
-    if 'cloud' not in df.columns: df['cloud'] = 0.0
-    return df
+        """Perfect forecast of [temp, rh, sky deficit, price] for the next `horizon` hours (normalised)."""
+        rows = []
+        for k in range(horizon):
+            h = (self.current_hour + k) % self.n_hours
+            rows.append([(self._wx["T_air_C"][h] - 10) / 40, self._wx["rh"][h],
+                         self._sky_deficit[h] / 150.0, (self.get_electricity_price(self.current_hour + k) - 0.06) / 0.19])
+        return np.clip(np.array(rows, dtype=np.float32), 0.0, 1.0)

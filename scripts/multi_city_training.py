@@ -142,7 +142,7 @@ class OracleHeuristic:
         State indices (normalized 0-1):
         0: T_air (ambient temp)
         1: RH (relative humidity)  
-        2: f_c (cloud fraction)
+        2: sky radiative deficit (sigma*T_air^4 - L_down)/150
         3: h_day (hour of day)
         4: Q_rad_cap (radiative capacity)
         5: Q_load (cooling load)
@@ -150,7 +150,7 @@ class OracleHeuristic:
         7: p_elec (electricity price)
         8: is_night (binary)
         
-        Forecast shape: (6, 4) - 6 hours × [temp, humidity, clouds, price]
+        Forecast shape: (6, 4) - 6 hours × [temp, humidity, sky deficit, price]
         """
         # Current conditions
         rad_cap_norm = state[4]  # 0-1, multiply by ~500 for kW
@@ -159,8 +159,9 @@ class OracleHeuristic:
         is_night = state[8] > 0.5
         humidity = state[1]
         
-        # Denormalize radiative capacity (assuming max ~500 kW)
-        rad_cap_kW = rad_cap_norm * 500
+        # Denormalize radiative capacity. The env normalises by 2000 kW; this used to multiply by 500,
+        # so the heuristic saw a quarter of the real capacity and under-used the panels.
+        rad_cap_kW = rad_cap_norm * 2000
         
         # === RADIATIVE FRACTION DECISION (α) ===
         # Use radiative cooling when capacity is good

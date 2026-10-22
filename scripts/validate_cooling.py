@@ -1,4 +1,4 @@
-"""Validate radiative cooling model against SkyCool benchmark."""
+"""Plot modelled net cooling power vs ambient temperature (model curve only; no measured data yet)."""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,7 +21,7 @@ def validate_against_skycool():
     ]
     
     plt.figure(figsize=(10, 6))
-    plt.axhspan(70, 100, color='gray', alpha=0.2, label='SkyCool Range')
+    # (uncited 'SkyCool Range' 70-100 W/m2 band removed; add measured points with a citation instead)
     
     for sc in scenarios:
         cooling_powers = []
@@ -46,7 +46,7 @@ def validate_against_skycool():
     plt.legend(loc='lower right')
     
     os.makedirs('figures', exist_ok=True)
-    output_path = "figures/validation_cooling_skycool.png"
+    output_path = "figures/model_cooling_vs_temperature.png"
     plt.savefig(output_path)
     print(f"✅ Validation plot saved to {output_path}")
 

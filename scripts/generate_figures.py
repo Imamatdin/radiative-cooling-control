@@ -311,40 +311,11 @@ def fig6_training_curves(results):
     print("✓ Figure 6: Training curves")
 
 
-def fig7_validation():
-    """Validation against SkyCool data."""
-    # SkyCool field data (approximate from literature)
-    skycool_temps = [15, 20, 25, 30, 35]
-    skycool_power = [70, 65, 55, 45, 35]
-    
-    # Our model predictions (showing same trend)
-    model_temps = np.linspace(15, 35, 50)
-    model_power = 85 - 1.5 * (model_temps - 15)  # Linear approximation showing same trend
-    
-    fig, ax = plt.subplots(figsize=(8, 5))
-    
-    ax.plot(model_temps, model_power, 'b-', linewidth=2, label='Our Physics Model')
-    ax.scatter(skycool_temps, skycool_power, c='red', s=100, marker='o', 
-               label='SkyCool Field Data', zorder=5, edgecolors='black')
-    
-    ax.set_xlabel('Ambient Temperature (°C)')
-    ax.set_ylabel('Net Cooling Power (W/m²)')
-    ax.set_title('Model Validation: Radiative Cooling vs Temperature')
-    ax.legend(loc='upper right')
-    ax.grid(True, alpha=0.3)
-    ax.set_xlim(10, 40)
-    ax.set_ylim(20, 100)
-    
-    # Add annotation
-    ax.annotate('Both show decreasing\ncooling with temperature', 
-                xy=(25, 55), xytext=(30, 75),
-                arrowprops=dict(arrowstyle='->', color='gray'),
-                fontsize=9, color='gray')
-    
-    plt.tight_layout()
-    plt.savefig(f'{FIGURES_DIR}/fig7_validation_final.png', dpi=300, bbox_inches='tight')
-    plt.close()
-    print("✓ Figure 7: Validation plot")
+# fig7_validation() was removed (Oct 2026). It plotted a hand-typed line (85 - 1.5*(T-15)) labelled
+# "Our Physics Model" against five hardcoded points labelled "SkyCool Field Data"; neither came from the
+# simulator or from measured data. Panel-model validation must use digitised measurements from
+# Goldstein et al. (Nature Energy 2017) or SkyCool's CEC-500-2025-002 field report, run through
+# src/physics/condenser_loop.panel_outlet.
 
 
 def fig8_ablation(results):
@@ -422,7 +393,6 @@ def main():
     fig4_controller_comparison(results)
     fig5_climate_heatmap(results)
     fig6_training_curves(results)
-    fig7_validation()
     fig8_ablation(results)
     
     print("\n" + "=" * 60)

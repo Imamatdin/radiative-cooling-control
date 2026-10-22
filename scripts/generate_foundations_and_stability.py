@@ -53,15 +53,8 @@ def generate_suite():
     else:
         print("SKIP FIG 6: No log files found in results/logs/")
 
-    # --- FIG 9: MODEL VALIDATION ---
-    benchmarks = ['Real SkyCool (2024)', 'Your Model (2025)']
-    performance = [95, 102] 
-    plt.figure(figsize=(8, 5))
-    plt.bar(benchmarks, performance, color=['grey', 'blue'])
-    plt.title('FIG 9: Model Validation vs. Industrial Benchmarks')
-    plt.ylabel('Net Cooling Power (W/m²)')
-    plt.savefig('results/fig9_validation_skycool.png', dpi=300)
-    print("Generated FIG 9")
+    # FIG 9 removed (Oct 2026): it was a bar chart of two hardcoded numbers (95 vs 102 W/m2)
+    # labelled as a validation against SkyCool. No measured data or model output was involved.
 
 if __name__ == "__main__":
     generate_suite()
