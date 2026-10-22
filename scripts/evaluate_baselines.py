@@ -67,10 +67,10 @@ def main():
         for k, r in rows.items():
             print(f"{k:62s} {r['cost_savings_pct']:7.2f} {r['elec_savings_pct']:7.2f} {r['water_savings_pct']:7.2f} "
                   f"{r['pct_of_optimal_cost_saving']:6.1f} {r['unmet_kWh']:6.1f}")
-    os.makedirs(os.path.dirname(args.out), exist_ok=True)
-    with open(args.out, "w") as f:
-        json.dump(results, f, indent=2)
-    print(f"\nwrote {args.out}")
+        os.makedirs(os.path.dirname(args.out), exist_ok=True)
+        with open(args.out, "w") as f:          # saved after every city so a killed run keeps its results
+            json.dump(results, f, indent=2)
+        print(f"wrote {args.out} ({', '.join(results)})", flush=True)
 
 
 if __name__ == "__main__":
