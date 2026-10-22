@@ -182,5 +182,97 @@
       "episodes": 58,
       "pct_of_optimal_cost_saving": 67.93986796384026
     }
+  },
+  "seattle": {
+    "panels | Tower only": {
+      "cost_savings_pct": 0.0,
+      "cost_savings_pct_std": 0.0,
+      "elec_savings_pct": 0.0,
+      "water_savings_pct": 0.0,
+      "unmet_kWh": 0.0,
+      "cost_saved_usd": 0.0,
+      "episodes": 58,
+      "pct_of_optimal_cost_saving": 0.0
+    },
+    "panels | Field always on, no storage": {
+      "cost_savings_pct": 25.001453929255334,
+      "cost_savings_pct_std": 9.086915591625383,
+      "elec_savings_pct": -4.797807611433313,
+      "water_savings_pct": 76.10985200771022,
+      "unmet_kWh": 0.0,
+      "cost_saved_usd": 16489.231102190533,
+      "episodes": 58,
+      "pct_of_optimal_cost_saving": 85.83668154676563
+    },
+    "panels | Operator TOU schedule": {
+      "cost_savings_pct": 28.670967740432136,
+      "cost_savings_pct_std": 9.939016784712887,
+      "elec_savings_pct": -2.3466597586023723,
+      "water_savings_pct": 74.77058210141668,
+      "unmet_kWh": 0.0,
+      "cost_saved_usd": 18909.388803274138,
+      "episodes": 58,
+      "pct_of_optimal_cost_saving": 98.43510439580125
+    },
+    "panels | MPC H=24h (persistence forecast)": {
+      "cost_savings_pct": 28.888189046345637,
+      "cost_savings_pct_std": 9.723639789204753,
+      "elec_savings_pct": -1.3237654505110295,
+      "water_savings_pct": 75.00869334376989,
+      "unmet_kWh": 0.0,
+      "cost_saved_usd": 19052.652963977052,
+      "episodes": 58,
+      "pct_of_optimal_cost_saving": 99.18088326584734
+    },
+    "panels | MPC H=24h (perfect forecast)": {
+      "cost_savings_pct": 29.04388478311924,
+      "cost_savings_pct_std": 9.703503936291389,
+      "elec_savings_pct": -1.1386980409739422,
+      "water_savings_pct": 75.18119393200396,
+      "unmet_kWh": 0.0,
+      "cost_saved_usd": 19155.339111452726,
+      "episodes": 58,
+      "pct_of_optimal_cost_saving": 99.71542839324036
+    },
+    "panels | DP oracle (perfect forecast, full episode)": {
+      "cost_savings_pct": 29.126771304216852,
+      "cost_savings_pct_std": 9.682602958207797,
+      "elec_savings_pct": -1.2715886736900286,
+      "water_savings_pct": 75.3951730042036,
+      "unmet_kWh": 0.0,
+      "cost_saved_usd": 19210.005332285422,
+      "episodes": 58,
+      "pct_of_optimal_cost_saving": 100.0
+    },
+    "dry_cooler_same_area | Field always on, no storage": {
+      "cost_savings_pct": 17.119561321174867,
+      "cost_savings_pct_std": 13.223555340685355,
+      "elec_savings_pct": -5.46088003376078,
+      "water_savings_pct": 55.76374107544685,
+      "unmet_kWh": 0.0,
+      "cost_saved_usd": 11290.879474119552,
+      "episodes": 58,
+      "pct_of_optimal_cost_saving": 58.77603508596358
+    },
+    "dry_cooler_same_area | Operator TOU schedule": {
+      "cost_savings_pct": 20.97844437837024,
+      "cost_savings_pct_std": 12.692485368873847,
+      "elec_savings_pct": -2.614082202420356,
+      "water_savings_pct": 53.969588473940554,
+      "unmet_kWh": 0.0,
+      "cost_saved_usd": 13835.932042121036,
+      "episodes": 58,
+      "pct_of_optimal_cost_saving": 72.02461323041689
+    },
+    "dry_cooler_same_area | DP oracle (perfect forecast, full episode)": {
+      "cost_savings_pct": 21.593150450097806,
+      "cost_savings_pct_std": 12.492663951891814,
+      "elec_savings_pct": -1.2954191073207288,
+      "water_savings_pct": 55.11540084590529,
+      "unmet_kWh": 0.0,
+      "cost_saved_usd": 14241.349683243694,
+      "episodes": 58,
+      "pct_of_optimal_cost_saving": 74.1350636655414
+    }
   }
 }
