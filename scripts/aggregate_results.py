@@ -24,6 +24,8 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 RES = os.path.join(ROOT, "results")
 OUTD = os.path.join(RES, "tables")
+SWEEP_DIR = os.path.join(RES, "sweep")
+MISMATCH_DIR = os.path.join(RES, "mismatch")
 CITIES = ["phoenix", "houston", "seattle"]
 ORACLE = "panels | DP oracle (perfect forecast, full episode)"
 
@@ -37,7 +39,7 @@ def boot_ci(x, n=10000, seed=0):
     return float(np.percentile(m, 2.5)), float(np.percentile(m, 97.5))
 
 
-def corner_scores(cache=os.path.join(RES, "tables", "corner_policy.json")):
+def corner_scores(cache=os.path.join(RES, "corner_policy.json")):
     if os.path.exists(cache):
         return json.load(open(cache))
     from src.environment.datacenter_env import DatacenterCoolingEnv, load_weather
@@ -54,7 +56,7 @@ def corner_scores(cache=os.path.join(RES, "tables", "corner_policy.json")):
 
 
 def sweep_table(base, corner):
-    runs = [json.load(open(f)) for f in glob.glob(os.path.join(RES, "sweep", "*.json"))]
+    runs = [json.load(open(f)) for f in glob.glob(os.path.join(SWEEP_DIR, "*.json"))]
     runs = [r for r in runs if "cost_savings_pct" in r]
     groups = defaultdict(list)
     for r in runs:
@@ -77,7 +79,7 @@ def sweep_table(base, corner):
 
 
 def mismatch_table():
-    files = glob.glob(os.path.join(RES, "mismatch", "*.json"))
+    files = glob.glob(os.path.join(MISMATCH_DIR, "*.json"))
     base, rl = {}, defaultdict(list)
     for f in files:
         r = json.load(open(f))
@@ -118,6 +120,14 @@ def write_csv(rows, path):
 
 
 def main():
+    import argparse
+    global SWEEP_DIR, MISMATCH_DIR, OUTD
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--sweep", default="results/sweep")
+    ap.add_argument("--mismatch", default="results/mismatch")
+    ap.add_argument("--out", default="results/tables")
+    a = ap.parse_args()
+    SWEEP_DIR, MISMATCH_DIR, OUTD = (os.path.join(ROOT, x) for x in (a.sweep, a.mismatch, a.out))
     os.makedirs(OUTD, exist_ok=True)
     base = json.load(open(os.path.join(RES, "baselines_corrected.json")))
     corner = corner_scores()
