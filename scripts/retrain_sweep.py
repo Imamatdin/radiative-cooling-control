@@ -162,7 +162,7 @@ def run_job(spec):
 
 
 def build_jobs(args):
-    seeds = list(range(args.seeds))
+    seeds = list(range(args.seed_offset, args.seed_offset + args.seeds))
     jobs = []
     for fc in args.forecasts:
         for c in args.cities:
@@ -177,6 +177,7 @@ def main():
     ap.add_argument("--workers", type=int,
                     default=int(os.environ.get("GMN_CPU_LIMIT", 0)) or max(1, (os.cpu_count() or 2) - 2))
     ap.add_argument("--seeds", type=int, default=10)
+    ap.add_argument("--seed-offset", type=int, default=0, help="first seed (keep final runs disjoint from pilot seeds)")
     ap.add_argument("--episodes", type=int, default=1000)
     ap.add_argument("--warmup", type=int, default=3000)
     ap.add_argument("--reward-scale", type=float, default=REWARD_SCALE)
