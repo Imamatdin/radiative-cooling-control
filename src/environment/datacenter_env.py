@@ -83,7 +83,8 @@ class DatacenterCoolingEnv:
     def __init__(self, weather_df: pd.DataFrame, episode_hours: int = 48,
                  plant_cfg: PlantConfig = None, reward_shaping: bool = False,
                  load_noise: bool = True, water_price: float = WATER_PRICE,
-                 tank_volume_m3: float = 50.0, tank_power_kW: float = 500.0, reward_scale: float = 15.0):
+                 tank_volume_m3: float = 50.0, tank_power_kW: float = 500.0, reward_scale: float = 15.0,
+                 forecast_mode: str = "perfect"):
         self.weather_df = weather_df.reset_index(drop=True)
         self.n_hours = len(self.weather_df)
         self.episode_hours = int(episode_hours)
@@ -93,6 +94,9 @@ class DatacenterCoolingEnv:
         self.water_price = float(water_price)
         self.tank_power_kW = float(tank_power_kW)
         self.reward_scale = float(reward_scale)
+        if forecast_mode not in ("perfect", "persistence"):
+            raise ValueError(f"forecast_mode must be 'perfect' or 'persistence', got {forecast_mode!r}")
+        self.forecast_mode = forecast_mode
         self.tank = ThermalStorageTank(volume_m3=tank_volume_m3, T_initial_C=11.0, T_min_C=7.0, T_max_C=15.0)
         self.pricing = PRICES
 
@@ -253,10 +257,19 @@ class DatacenterCoolingEnv:
         return self._get_state(), reward, done, info
 
     def get_forecast(self, horizon: int = 6) -> np.ndarray:
-        """Perfect forecast of [temp, rh, sky deficit, price] for the next `horizon` hours (normalised)."""
+        """Forecast of [temp, rh, sky deficit, price] for the next `horizon` hours (normalised).
+
+        forecast_mode='perfect'     -> the actual weather of hour t+k.
+        forecast_mode='persistence' -> hour t is observed; hour t+k (k>0) is forecast as the observed weather
+                                       at t+k-24, the same rule MPCPolicy(forecast='persistence') uses.
+        The tariff is a published schedule, so price is exact in both modes.
+        """
         rows = []
         for k in range(horizon):
-            h = (self.current_hour + k) % self.n_hours
+            if self.forecast_mode == "persistence" and k > 0:
+                h = (self.current_hour + k - 24) % self.n_hours
+            else:
+                h = (self.current_hour + k) % self.n_hours
             rows.append([(self._wx["T_air_C"][h] - 10) / 40, self._wx["rh"][h],
                          self._sky_deficit[h] / 150.0, (self.get_electricity_price(self.current_hour + k) - 0.06) / 0.19])
         return np.clip(np.array(rows, dtype=np.float32), 0.0, 1.0)
