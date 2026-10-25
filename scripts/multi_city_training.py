@@ -284,6 +284,15 @@ class DoubleCritic(nn.Module):
 # AGENTS
 # =============================================================================
 
+def to_env_action(a_raw):
+    """Map raw tanh actions in [-1,1]^2 to environment units: alpha in [0,1], beta in [-1,1].
+
+    The replay buffer stores environment-unit actions, so the critic is trained on them. Every place that feeds
+    an actor output into a critic (TD target and actor loss) must apply this same map, or the actor is optimised
+    against critic values at actions the critic never saw. Before 2026-10-25 the actor loss skipped it."""
+    return torch.cat([(a_raw[:, :1] + 1.0) / 2.0, a_raw[:, 1:]], dim=1)
+
+
 class BaseAgent:
     def __init__(self, state_dim, action_dim, use_forecast=True, forecast_dim=24,
                  hidden_dims=[256, 256], lr=3e-4, gamma=0.99, tau=0.005):
@@ -354,14 +363,14 @@ class DDPGAgent(BaseAgent):
         d = torch.FloatTensor(np.array([b[4] for b in batch])).unsqueeze(1).to(self.device)
         
         with torch.no_grad():
-            target_q = r + (1 - d) * self.gamma * self.critic_target(ns, self.actor_target(ns))
+            target_q = r + (1 - d) * self.gamma * self.critic_target(ns, to_env_action(self.actor_target(ns)))
         
         critic_loss = nn.MSELoss()(self.critic(s, a), target_q)
         self.critic_opt.zero_grad()
         critic_loss.backward()
         self.critic_opt.step()
         
-        actor_loss = -self.critic(s, self.actor(s)).mean()
+        actor_loss = -self.critic(s, to_env_action(self.actor(s))).mean()
         self.actor_opt.zero_grad()
         actor_loss.backward()
         self.actor_opt.step()
@@ -431,7 +440,7 @@ class TD3Agent(BaseAgent):
         self.critic_opt.step()
         
         if self.update_count % self.policy_delay == 0:
-            actor_loss = -self.critic.q1(s, self.actor(s)).mean()
+            actor_loss = -self.critic.q1(s, to_env_action(self.actor(s))).mean()
             self.actor_opt.zero_grad()
             actor_loss.backward()
             self.actor_opt.step()
@@ -442,60 +451,96 @@ class TD3Agent(BaseAgent):
                 tp.data.copy_(self.tau * p.data + (1 - self.tau) * tp.data)
 
 
+class GaussianActor(nn.Module):
+    """Squashed-Gaussian policy for SAC: a_raw = tanh(u), u ~ N(mu(s), sigma(s))."""
+
+    LOG_STD_MIN, LOG_STD_MAX = -5.0, 2.0
+
+    def __init__(self, state_dim, action_dim, hidden_dims=[256, 256]):
+        super().__init__()
+        layers, prev = [], state_dim
+        for h in hidden_dims:
+            layers.extend([nn.Linear(prev, h), nn.ReLU()])
+            prev = h
+        self.body = nn.Sequential(*layers)
+        self.mu = nn.Linear(prev, action_dim)
+        self.log_std = nn.Linear(prev, action_dim)
+
+    def forward(self, x, deterministic=False):
+        h = self.body(x)
+        mu = self.mu(h)
+        log_std = self.log_std(h).clamp(self.LOG_STD_MIN, self.LOG_STD_MAX)
+        if deterministic:
+            return torch.tanh(mu), None
+        std = log_std.exp()
+        u = mu + std * torch.randn_like(mu)
+        a = torch.tanh(u)
+        # log N(u) minus the tanh Jacobian (numerically stable form)
+        logp = (-0.5 * ((u - mu) / std) ** 2 - log_std - 0.5 * np.log(2 * np.pi)).sum(1, keepdim=True)
+        logp = logp - (2 * (np.log(2) - u - nn.functional.softplus(-2 * u))).sum(1, keepdim=True)
+        return a, logp
+
+
 class SACAgent(BaseAgent):
+    """Soft actor-critic (Haarnoja et al. 2018, v2): stochastic squashed-Gaussian policy, twin critics with
+    target networks, automatic entropy temperature with target entropy -|A|.
+
+    Before 2026-10-25 a class with this name was a deterministic actor with target-policy smoothing and no
+    entropy term; results from it are archived under results/sweep_v1."""
+
     def __init__(self, state_dim=9, action_dim=2, use_forecast=True, **kwargs):
         super().__init__(state_dim, action_dim, use_forecast, **kwargs)
-        
-        self.actor = Actor(self.input_dim, action_dim).to(self.device)
+        self.actor = GaussianActor(self.input_dim, action_dim).to(self.device)
         self.critic = DoubleCritic(self.input_dim, action_dim).to(self.device)
         self.critic_target = DoubleCritic(self.input_dim, action_dim).to(self.device)
         self.critic_target.load_state_dict(self.critic.state_dict())
-        
         self.actor_opt = optim.Adam(self.actor.parameters(), lr=3e-4)
         self.critic_opt = optim.Adam(self.critic.parameters(), lr=3e-4)
-    
+        self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
+        self.alpha_opt = optim.Adam([self.log_alpha], lr=3e-4)
+        self.target_entropy = -float(action_dim)
+
     def select_action(self, state, forecast=None, noise=0.1):
+        """noise > 0 -> sample from the policy (training); noise == 0 -> the policy mean (evaluation)."""
         s = self._process_state(state, forecast)
         s_t = torch.FloatTensor(s).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            a = self.actor(s_t).cpu().numpy()[0]
-        
-        if noise > 0:
-            a = a + np.random.normal(0, noise, a.shape)
-        
-        a[0] = (a[0] + 1) / 2.0
-        
-        return np.clip(a, [0, -1], [1, 1])
-    
+            a, _ = self.actor(s_t, deterministic=(noise <= 0))
+        return to_env_action(a).cpu().numpy()[0].clip([0, -1], [1, 1])
+
     def train_step(self, batch_size=128):
         if len(self.buffer) < batch_size: return
-        
         batch = random.sample(self.buffer, batch_size)
         s = torch.FloatTensor(np.array([b[0] for b in batch])).to(self.device)
         a = torch.FloatTensor(np.array([b[1] for b in batch])).to(self.device)
         r = torch.FloatTensor(np.array([b[2] for b in batch])).unsqueeze(1).to(self.device)
         ns = torch.FloatTensor(np.array([b[3] for b in batch])).to(self.device)
         d = torch.FloatTensor(np.array([b[4] for b in batch])).unsqueeze(1).to(self.device)
-        
-        with torch.no_grad():
-            na = self.actor(ns) + torch.randn_like(a) * 0.1
-            na = na.clamp(-1, 1)
-            na[:, 0] = (na[:, 0] + 1) / 2.0
+        alpha = self.log_alpha.exp().detach()
 
-            tq1, tq2 = self.critic_target(ns, na)
-            target_q = r + (1 - d) * self.gamma * torch.min(tq1, tq2)
+        with torch.no_grad():
+            na, nlogp = self.actor(ns)
+            tq1, tq2 = self.critic_target(ns, to_env_action(na))
+            target_q = r + (1 - d) * self.gamma * (torch.min(tq1, tq2) - alpha * nlogp)
 
         q1, q2 = self.critic(s, a)
         critic_loss = nn.MSELoss()(q1, target_q) + nn.MSELoss()(q2, target_q)
         self.critic_opt.zero_grad()
         critic_loss.backward()
         self.critic_opt.step()
-        
-        actor_loss = -self.critic.q1(s, self.actor(s)).mean()
+
+        pa, logp = self.actor(s)
+        q1p, q2p = self.critic(s, to_env_action(pa))
+        actor_loss = (alpha * logp - torch.min(q1p, q2p)).mean()
         self.actor_opt.zero_grad()
         actor_loss.backward()
         self.actor_opt.step()
-        
+
+        alpha_loss = -(self.log_alpha * (logp.detach() + self.target_entropy)).mean()
+        self.alpha_opt.zero_grad()
+        alpha_loss.backward()
+        self.alpha_opt.step()
+
         for p, tp in zip(self.critic.parameters(), self.critic_target.parameters()):
             tp.data.copy_(self.tau * p.data + (1 - self.tau) * tp.data)
 
@@ -552,7 +597,8 @@ def train_agent(env, agent, name, num_episodes=1000, warmup=3000, verbose=True):
         forecast = env.get_forecast() if agent.use_forecast else None
         next_state, reward, done, _ = env.step(action)
         next_forecast = env.get_forecast() if agent.use_forecast else None
-        agent.store(state, forecast, action, reward, next_state, next_forecast, done)
+        # The env has no terminal states; `done` only marks the 48 h time limit, so it must not cut the bootstrap.
+        agent.store(state, forecast, action, reward, next_state, next_forecast, False)
         state = next_state if not done else env.reset(test=False)
     
     if verbose:
@@ -572,7 +618,7 @@ def train_agent(env, agent, name, num_episodes=1000, warmup=3000, verbose=True):
             next_state, reward, done, info = env.step(action)
             next_forecast = env.get_forecast() if agent.use_forecast else None
             
-            agent.store(state, forecast, action, reward, next_state, next_forecast, done)
+            agent.store(state, forecast, action, reward, next_state, next_forecast, False)   # time limit != terminal
             
             # Multiple gradient steps per env step
             for _ in range(2):
