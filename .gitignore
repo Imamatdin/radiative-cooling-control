@@ -25,3 +25,4 @@ env/
 # Archives (the repo itself is the archive)
 *.zip
 results/sweep_smoke/
+results/mismatch_smoke/
