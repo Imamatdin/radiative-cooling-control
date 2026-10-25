@@ -26,3 +26,6 @@ env/
 *.zip
 results/sweep_smoke/
 results/mismatch_smoke/
+results/sweep/models/
+results/sweep/*.tmp
+results/mismatch/*.tmp
