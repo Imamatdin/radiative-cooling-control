@@ -186,9 +186,12 @@ def main():
     ap.add_argument("--dr", action="store_true", help="domain-randomise the plant during training")
     ap.add_argument("--shard", type=str, default="0/1", help="i/n or i,j,k/n: run every n-th job starting at each listed i")
     ap.add_argument("--list", action="store_true", help="print this shard's job names and exit")
+    ap.add_argument("--out", default=None, help="results directory (default results/sweep)")
     ap.add_argument("--smoke", action="store_true", help="tiny run to verify the pipeline end to end")
     args = ap.parse_args()
     global OUT
+    if args.out:
+        OUT = os.path.join(ROOT, args.out) if not os.path.isabs(args.out) else args.out
     if args.smoke:
         OUT = os.path.join(ROOT, "results", "sweep_smoke")
         args.seeds, args.episodes, args.warmup, args.cities, args.algos = 1, 3, 100, ["houston"], ["SAC", "TD3"]

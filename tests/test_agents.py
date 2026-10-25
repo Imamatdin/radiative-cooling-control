@@ -20,8 +20,12 @@ from multi_city_training import DDPGAgent, TD3Agent, SACAgent, GaussianActor, to
 A_STAR = np.array([0.25, -0.5])
 
 
+REWARD_SCALE = 20.0   # the env's per-step rewards are O(10-100); at O(0.1) SAC's entropy term dominates for
+                      # thousands of steps while its temperature anneals (checked at x1: action 0.315 vs 0.25 after 6000 steps)
+
+
 def bandit_reward(a):
-    return -float(((np.asarray(a) - A_STAR) ** 2).sum())
+    return -REWARD_SCALE * float(((np.asarray(a) - A_STAR) ** 2).sum())
 
 
 def test_to_env_action_range_and_gradient():

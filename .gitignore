@@ -29,3 +29,5 @@ results/mismatch_smoke/
 results/sweep/models/
 results/sweep/*.tmp
 results/mismatch/*.tmp
+results/sweep_v1/models/
+results/sweep_v2*/models/
